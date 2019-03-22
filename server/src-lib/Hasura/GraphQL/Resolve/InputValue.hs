@@ -143,8 +143,7 @@ asPGColText val = do
 
 asPGColTextM
   :: (MonadError QErr m)
-  => AnnGValue -> m (Maybe Text)
+  => AnnInpVal -> m (Maybe Text)
 asPGColTextM val = do
   pgColValM <- fmap _apvValue <$> asPGColValM val
   mapM onlyText pgColValM
-
