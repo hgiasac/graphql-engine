@@ -13,7 +13,7 @@ module Hasura.GraphQL.Resolve.InputValue
   , withArrayM
   , parseMany
   , asPGColText
-  , AnnPGVal
+  , asPGColTextM
   ) where
 
 import           Hasura.Prelude
