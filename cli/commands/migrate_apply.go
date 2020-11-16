@@ -6,6 +6,7 @@ import (
 
 	"github.com/hasura/graphql-engine/cli"
 	migrate "github.com/hasura/graphql-engine/cli/migrate"
+	"github.com/hasura/graphql-engine/cli/migrate/database/nativedb"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -101,6 +102,9 @@ func newMigrateApplyCmd(ec *cli.ExecutionContext) *cobra.Command {
 	f.StringVar(&opts.MigrationType, "type", "up", "type of migration (up, down) to be used with version flag")
 
 	f.BoolVar(&opts.dryRun, "dry-run", false, "print the names of migrations which are going to be applied")
+	f.BoolVar(&opts.TransactionDisabled, "disable-transaction", false, "execute migration without transaction with native driver")
+	f.StringVar(&opts.DatabaseURL, "database-url", "", "database url for native driver")
+
 	return migrateApplyCmd
 }
 
@@ -112,13 +116,15 @@ type MigrateApplyOptions struct {
 	VersionMigration string
 	MigrationType    string
 	// version up to which migration chain has to be applied
-	GotoVersion   string
-	SkipExecution bool
-	dryRun        bool
+	GotoVersion         string
+	SkipExecution       bool
+	TransactionDisabled bool
+	DatabaseURL         string
+	dryRun              bool
 }
 
 func (o *MigrateApplyOptions) Run() error {
-	migrationType, step, err := getMigrationTypeAndStep(o.UpMigration, o.DownMigration, o.VersionMigration, o.MigrationType, o.GotoVersion, o.SkipExecution)
+	migrationType, step, err := getMigrationTypeAndStep(o.UpMigration, o.DownMigration, o.VersionMigration, o.MigrationType, o.GotoVersion, o.SkipExecution, o.TransactionDisabled, o.DatabaseURL)
 	if err != nil {
 		return errors.Wrap(err, "error validating flags")
 	}
@@ -130,12 +136,23 @@ func (o *MigrateApplyOptions) Run() error {
 	migrateDrv.SkipExecution = o.SkipExecution
 	migrateDrv.DryRun = o.dryRun
 
+	if o.TransactionDisabled && o.DatabaseURL != "" {
+		migrateDrv.TransactionDisabled = true
+		db, err := nativedb.Open(o.DatabaseURL, o.EC.Logger)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+
+		migrateDrv.NativeDatabaseDrv = db
+	}
+
 	return ExecuteMigration(migrationType, migrateDrv, step)
 }
 
 // Only one flag out of up, down and version can be set at a time. This function
 // checks whether that is the case and returns an error is not
-func getMigrationTypeAndStep(upMigration, downMigration, versionMigration, migrationType, gotoVersion string, skipExecution bool) (string, int64, error) {
+func getMigrationTypeAndStep(upMigration, downMigration, versionMigration, migrationType, gotoVersion string, skipExecution bool, transactionDisabled bool, databaseURL string) (string, int64, error) {
 	var flagCount = 0
 	var stepString = "all"
 	var migrationName = "up"
@@ -168,6 +185,10 @@ func getMigrationTypeAndStep(upMigration, downMigration, versionMigration, migra
 
 	if migrationName != "version" && skipExecution {
 		return "", 0, errors.New("--skip-execution flag can be set only with --version flag")
+	}
+
+	if transactionDisabled && databaseURL == "" {
+		return "", 0, errors.New("--database-url flag is required when --disable-transaction flag is true")
 	}
 
 	if stepString == "all" && migrationName != "version" {

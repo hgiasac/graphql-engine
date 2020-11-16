@@ -20,6 +20,35 @@ const NilVersion int64 = -1
 var driversMu sync.RWMutex
 var drivers = make(map[string]Driver)
 
+type MigrationExecutionDriver interface {
+
+	// Lock should acquire a database lock so that only one migration process
+	// can run at a time. Migrate will call this function before Run is called.
+	// If the implementation can't provide this functionality, return nil.
+	// Return database.ErrLocked if database is already locked.
+	Lock() error
+
+	// Unlock should release the lock. Migrate will call this function after
+	// all migrations have been run.
+	UnLock() error
+
+	// Run applies a migration to the database. migration is garantueed to be not nil.
+	Run(migration io.Reader, fileType, fileName string) error
+
+	// InsertVersion saves version
+	// Migrate will call this function before and after each call to Run.
+	// version must be >= -1. -1 means NilVersion.
+	InsertVersion(version int64) error
+
+	// SetVersion saves version and dirty state.
+	// Migrate will call this function before and after each call to Run.
+	// version must be >= -1. -1 means NilVersion.
+	RemoveVersion(version int64) error
+
+	// Reset Migration Query Args
+	ResetQuery()
+}
+
 // Driver is the interface every database driver must implement.
 //
 // How to implement a database driver?
@@ -51,33 +80,6 @@ type Driver interface {
 	Close() error
 
 	Scan() error
-
-	// Lock should acquire a database lock so that only one migration process
-	// can run at a time. Migrate will call this function before Run is called.
-	// If the implementation can't provide this functionality, return nil.
-	// Return database.ErrLocked if database is already locked.
-	Lock() error
-
-	// Unlock should release the lock. Migrate will call this function after
-	// all migrations have been run.
-	UnLock() error
-
-	// Run applies a migration to the database. migration is garantueed to be not nil.
-	Run(migration io.Reader, fileType, fileName string) error
-
-	// Reset Migration Query Args
-	ResetQuery()
-
-	// InsertVersion saves version
-	// Migrate will call this function before and after each call to Run.
-	// version must be >= -1. -1 means NilVersion.
-	InsertVersion(version int64) error
-
-	// SetVersion saves version and dirty state.
-	// Migrate will call this function before and after each call to Run.
-	// version must be >= -1. -1 means NilVersion.
-	RemoveVersion(version int64) error
-
 	// Version returns the currently active version and if the database is dirty.
 	// When no migration has been applied, it must return version -1.
 	// Dirty means, a previous migration failed and user interaction is required.
@@ -105,6 +107,8 @@ type Driver interface {
 	PushToList(migration io.Reader, fileType string, list *CustomList) error
 
 	Squash(list *CustomList, ret chan<- interface{})
+
+	MigrationExecutionDriver
 
 	SettingsDriver
 

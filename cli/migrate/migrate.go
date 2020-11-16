@@ -21,6 +21,7 @@ import (
 
 	"github.com/hasura/graphql-engine/cli/metadata/types"
 	"github.com/hasura/graphql-engine/cli/migrate/database"
+	"github.com/hasura/graphql-engine/cli/migrate/database/nativedb"
 	"github.com/hasura/graphql-engine/cli/migrate/source"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -73,9 +74,10 @@ type Migrate struct {
 	sourceURL  string
 	sourceDrv  source.Driver
 
-	databaseName string
-	databaseURL  string
-	databaseDrv  database.Driver
+	databaseName      string
+	databaseURL       string
+	databaseDrv       database.Driver
+	NativeDatabaseDrv nativedb.Driver
 
 	// Logger is the global logger object to print logs.
 	Logger *log.Logger
@@ -102,8 +104,9 @@ type Migrate struct {
 
 	status *Status
 
-	SkipExecution bool
-	DryRun        bool
+	SkipExecution       bool
+	DryRun              bool
+	TransactionDisabled bool
 }
 
 // New returns a new Migrate instance from a source URL and a database URL.
@@ -1201,8 +1204,14 @@ func (m *Migrate) runMigrations(ret <-chan interface{}) error {
 		case *Migration:
 			migr := r.(*Migration)
 			if migr.Body != nil {
+				var drv database.MigrationExecutionDriver
+				if m.TransactionDisabled {
+					drv = m.NativeDatabaseDrv
+				} else {
+					drv = m.databaseDrv
+				}
 				if !m.SkipExecution {
-					if err := m.databaseDrv.Run(migr.BufferedBody, migr.FileType, migr.FileName); err != nil {
+					if err := drv.Run(migr.BufferedBody, migr.FileType, migr.FileName); err != nil {
 						return err
 					}
 				}
@@ -1211,14 +1220,14 @@ func (m *Migrate) runMigrations(ret <-chan interface{}) error {
 				if version == migr.TargetVersion {
 					if version != lastInsertVersion {
 						// Insert Version number into the table
-						if err := m.databaseDrv.InsertVersion(version); err != nil {
+						if err := drv.InsertVersion(version); err != nil {
 							return err
 						}
 						lastInsertVersion = version
 					}
 				} else {
 					// Delete Version number from the table
-					if err := m.databaseDrv.RemoveVersion(version); err != nil {
+					if err := drv.RemoveVersion(version); err != nil {
 						return err
 					}
 				}
@@ -1850,11 +1859,11 @@ func (m *Migrate) ApplySeed(q interface{}) error {
 func (m *Migrate) ExportDataDump(tableNames []string) ([]byte, error) {
 	// to support tables starting with capital letters
 	modifiedTableNames := make([]string, len(tableNames))
-	
+
 	for idx, val := range tableNames {
 		split := strings.Split(val, ".")
 		splitLen := len(split)
-		
+
 		if splitLen != 1 && splitLen != 2 {
 			return nil, fmt.Errorf(`invalid schema/table provided "%s"`, val)
 		}
@@ -1865,7 +1874,7 @@ func (m *Migrate) ExportDataDump(tableNames []string) ([]byte, error) {
 			modifiedTableNames[idx] = fmt.Sprintf(`"%s"`, val)
 		}
 	}
-	
+
 	return m.databaseDrv.ExportDataDump(modifiedTableNames)
 }
 
