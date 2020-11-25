@@ -33,6 +33,9 @@ func newMigrateApplyCmd(ec *cli.ExecutionContext) *cobra.Command {
   # Apply a particular migration version only:
   hasura migrate apply --version "<version>"
 
+  # Apply migration with native postgres driver and transaction disabled:
+	hasura migrate apply --disable-transaction --database-url "<url>"
+	
   # Apply last 2 down migrations:
   hasura migrate apply --down 2
 
